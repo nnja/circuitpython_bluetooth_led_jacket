@@ -13,6 +13,21 @@ import neopixel
 import random
 import time
 
+from adafruit_led_animation.animation.blink import Blink
+from adafruit_led_animation.animation.sparklepulse import SparklePulse
+from adafruit_led_animation.animation.comet import Comet
+from adafruit_led_animation.animation.chase import Chase
+from adafruit_led_animation.animation.pulse import Pulse
+from adafruit_led_animation.animation.sparkle import Sparkle
+from adafruit_led_animation.animation.rainbowchase import RainbowChase
+from adafruit_led_animation.animation.rainbowsparkle import RainbowSparkle
+from adafruit_led_animation.animation.rainbowcomet import RainbowComet
+from adafruit_led_animation.animation.solid import Solid
+from adafruit_led_animation.animation.colorcycle import ColorCycle
+from adafruit_led_animation.animation.rainbow import Rainbow
+from adafruit_led_animation.sequence import AnimationSequence
+from adafruit_led_animation.color import PURPLE, WHITE, AMBER, JADE, MAGENTA, ORANGE
+
 from adafruit_ble import BLERadio
 from adafruit_ble.advertising.standard import ProvideServicesAdvertisement
 from adafruit_ble.services.nordic import UARTService
@@ -29,10 +44,43 @@ num_pixels = 5
 pixels = neopixel.NeoPixel(
     board.D12,
     num_pixels,
+    brightness=0.5, auto_write=False
 )
 onboard_pixel = neopixel.NeoPixel(board.NEOPIXEL, 10, brightness=0.01)
 
 print("Starting...")
+
+
+blink = Blink(pixels, speed=0.5, color=JADE)
+colorcycle = ColorCycle(pixels, speed=0.4, colors=[MAGENTA, ORANGE])
+comet = Comet(pixels, speed=0.15, color=PURPLE, tail_length=5, bounce=True)
+chase = Chase(pixels, speed=0.15, size=3, spacing=6, color=WHITE)
+pulse = Pulse(pixels, speed=0.15, period=2, color=PURPLE)
+sparkle = Sparkle(pixels, speed=0.1, color=PURPLE, num_sparkles=10)
+solid = Solid(pixels, color=JADE)
+rainbow = Rainbow(pixels, speed=0.1, period=2)
+sparkle_pulse = SparklePulse(pixels, speed=0.1, period=20, color=JADE, min_intensity=0.2, max_intensity=0.6)
+rainbow_comet = RainbowComet(pixels, speed=0.12, tail_length=10, bounce=True)
+rainbow_chase = RainbowChase(pixels, speed=0.1, size=3, spacing=2, step=8)
+rainbow_sparkle = RainbowSparkle(pixels, speed=0.1, num_sparkles=15)
+
+
+animations = AnimationSequence(
+    comet,
+    chase,
+    pulse,
+    sparkle_pulse,
+    rainbow_comet,
+    auto_clear=True,
+)
+
+anim_list = [
+    comet,
+    chase,
+    pulse,
+    sparkle_pulse,
+    rainbow_comet,
+]
 
 def chance(odds):
     return random.random() < odds
@@ -66,18 +114,33 @@ def pattern():
 
     time.sleep(random.random() * 0.02 + 0.01)
 
+def print_cycle_complete(animation_object):
+    random_color = color_list[random.randint(0, len(color_list) - 1)]
+    animation_object.color = random_color
+pulse.add_cycle_complete_receiver(print_cycle_complete)
+
+selected_color = None
+
 while True:
     # Advertise when not connected.
     ble.start_advertising(advertisement)
 
     while not ble.connected:
-        pattern()
+        #pattern()
+        animations.animate()
+        random_color = color_list[random.randint(0, len(color_list) - 1)]
+        if animations.current_animation != pulse:
+            animations.color = random_color
         onboard_pixel.fill((128, 0, 0))
 
     ble.stop_advertising()
 
     while ble.connected:
-        pattern()
+        # pattern()
+        animations.animate()
+        random_color = color_list[random.randint(0, len(color_list) - 1)]
+        if animations.current_animation != pulse:
+            animations.color = selected_color or random_color
         if uart_service.in_waiting:
             packet = Packet.from_stream(uart_service)
 
@@ -85,12 +148,32 @@ while True:
                 print("Color Picked", packet.color)
                 pixels.fill((0, 0, 0))
                 color_list = [packet.color] * 4
+                selected_color = packet.color
                 onboard_pixel.fill(packet.color)
 
             if isinstance(packet, ButtonPacket):
                 if packet.pressed:
                     if packet.button == ButtonPacket.BUTTON_1:
                         # The 1 button was pressed.
-                        print("1 button pressed!")
+                        print("Resetting colors. (1 button pressed)")
                         # reset colors
                         color_list = [(0, 0, 255), (0, 255, 255), (255, 255, 0), (255, 0, 255)]
+                        selected_color = None
+                    elif packet.button == ButtonPacket.RIGHT:
+                        animations.next()
+                        print("Selecting next animation: ", animations.current_animation.__class__.__name__)
+                        print("Speed is:", animations.current_animation.speed)
+                    elif packet.button == ButtonPacket.DOWN:
+                        print("Speeding up.")
+                        new_speed = animations.current_animation.speed + 0.025
+                        for animation in anim_list:
+                            animation.speed = new_speed
+                        print("New speed is", new_speed)
+                    elif packet.button == ButtonPacket.UP:
+                        print("Slowing down.")
+                        current_speed = animations.current_animation.speed
+                        new_speed = max(0.05, current_speed - 0.025)
+                        for animation in anim_list:
+                            animation.speed = new_speed
+                        print("New speed is", new_speed)
+                    
